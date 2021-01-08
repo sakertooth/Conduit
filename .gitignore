@@ -1,10 +1,6 @@
-﻿################################################################################
-# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
-################################################################################
-
-/Properties
+﻿/Properties
 /Conduit.sln
 /obj
 /.vs/Conduit
-/bin/Debug/netcoreapp3.1
-/bin/Release/netcoreapp3.1
+/bin/
+/.vs
