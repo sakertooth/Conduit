@@ -34,22 +34,19 @@ namespace Conduit
 
                 if (!IPAddressRange.TryParse(target, out var targetRange) || !PortRange.TryParse(ports, out var portRange))
                 {
-                    Console.WriteLine("Could not parse the IP or port range.");
+                    Console.WriteLine("Could not parse the IP or port range");
                     return;
                 }
 
-                var endpointJoinBlock = new JoinBlock<IPAddress, int>();
+                var endpointBatchBlock = new BatchBlock<IPEndPoint>(size, new GroupingDataflowBlockOptions() { BoundedCapacity = size });
 
-                var endpointBatchBlock = new BatchBlock<Tuple<IPAddress, int>>(size, new GroupingDataflowBlockOptions() { EnsureOrdered = false });
-
-                var scanBlock = new ActionBlock<Tuple<IPAddress, int>[]>(async endpoints =>
+                var scanBlock = new ActionBlock<IPEndPoint[]>(async endpoints =>
                 {
                     var scanTasks = new List<Task>(endpoints.Length);
 
                     foreach (var endpoint in endpoints)
                     {
-                        var (addr, port) = endpoint;
-                        scanTasks.Add(ServerListPing.SendMinecraftSlp(addr, port, timeout, query).ContinueWith(t =>
+                        scanTasks.Add(ServerListPing.SendMinecraftSlp(endpoint.Address, endpoint.Port, timeout, query).ContinueWith(t =>
                         {
                             if (t.Result != null)
                             {
@@ -60,25 +57,22 @@ namespace Conduit
                     }
 
                     await Task.WhenAll(scanTasks);
-                });
+                }, new ExecutionDataflowBlockOptions() { BoundedCapacity = 1 });
 
-                var linkOptions = new DataflowLinkOptions() { PropagateCompletion = true };
-                endpointJoinBlock.LinkTo(endpointBatchBlock, linkOptions);
-                endpointBatchBlock.LinkTo(scanBlock, linkOptions);
+                endpointBatchBlock.LinkTo(scanBlock, new DataflowLinkOptions() { PropagateCompletion = true });
 
                 foreach (var ip in targetRange)
                 {
                     foreach (var port in portRange)
                     {
-                        endpointJoinBlock.Target1.Post(ip);
-                        endpointJoinBlock.Target2.Post(port);
+                        await endpointBatchBlock.SendAsync(new IPEndPoint(ip, port));
                     }
                 }
 
-                endpointJoinBlock.Complete();
+                endpointBatchBlock.Complete();
                 await scanBlock.Completion;
 
-                Console.WriteLine($"{ Found } servers were found in {(double)runTime.ElapsedMilliseconds / 1000} seconds");
+                Console.WriteLine($"Found {Found} servers in {(double)runTime.ElapsedMilliseconds / 1000} seconds");
             });
 
             return rootCommand.InvokeAsync(args).Result;
