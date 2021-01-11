@@ -26,7 +26,6 @@ namespace Conduit
                 new Argument<string>("ports", () => "25565", "Port/Port range to scan with"),
                 new Option<int>(new string[] {"-t", "--timeout" }, () => 500, "Timeout in milliseconds"),
                 new Option<int>(new string[] {"-s", "--size"}, () => 254, "Number of hosts to scan by batch"),
-                new Option<bool>(new string[] {"-q", "--query"}, () => false, "Query servers if the Server List Ping failed")
             };
 
             rootCommand.Handler = CommandHandler.Create<string, string, int, int, bool>(async (target, ports, timeout, size, query) =>
@@ -43,35 +42,13 @@ namespace Conduit
                 var blockOptions = new ExecutionDataflowBlockOptions() { MaxDegreeOfParallelism = size, BoundedCapacity = size, EnsureOrdered = false };
                 var linkOptions = new DataflowLinkOptions() { PropagateCompletion = true };
 
-                #region Query
-
-                var queryBlock = new TransformBlock<IPEndPoint, MinecraftResponse>(async endpoint =>
-                {
-                    try
-                    {
-                        return await MinecraftQuery.SendQuery(endpoint.Address, endpoint.Port, timeout);
-                    }
-                    catch (SocketException) { return null; }
-                }, new ExecutionDataflowBlockOptions() { BoundedCapacity = size, EnsureOrdered = false } );
-
-                #endregion
-
-                #region Ping
-
                 var pingBlock = new TransformBlock<IPEndPoint, Tuple<IPEndPoint, byte[]>>(async endpoint =>
                 {
                     try
                     {
                         return Tuple.Create(endpoint, await MinecraftPing.GetResponse(endpoint.Address, endpoint.Port, timeout));
                     }
-                    catch (Exception ex) when (ex is IOException || ex is SocketException)
-                    {
-                        if (query)
-                        {
-                            await queryBlock.SendAsync(endpoint);
-                        }
-                        return null;
-                    }
+                    catch (Exception ex) when (ex is IOException || ex is SocketException) { return null; }
                 }, blockOptions);
 
                 var parseJsonBlock = new TransformBlock<Tuple<IPEndPoint, byte[]>, MinecraftResponse>(async json =>
@@ -91,17 +68,12 @@ namespace Conduit
                     Console.WriteLine($"{response.Address}:{response.Port} [{response.Version}] ({response.Online}/{response.Max}) {response.Description}");
                     ++Found;
                 }, blockOptions);
-                
-                #endregion
 
                 pingBlock.LinkTo(parseJsonBlock, linkOptions, x => x != null);
                 pingBlock.LinkTo(DataflowBlock.NullTarget<Tuple<IPEndPoint, byte[]>>(), linkOptions);
 
                 parseJsonBlock.LinkTo(printBlock, linkOptions, x => x != null);
                 parseJsonBlock.LinkTo(DataflowBlock.NullTarget<MinecraftResponse>());
-
-                queryBlock.LinkTo(printBlock, linkOptions, x => x != null);
-                queryBlock.LinkTo(DataflowBlock.NullTarget<MinecraftResponse>());
 
                 foreach (var ip in targetRange)
                 {
