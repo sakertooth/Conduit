@@ -24,7 +24,7 @@ namespace Conduit
                 new Argument<string>("target", "Target to scan for"),
                 new Argument<string>("ports", () => "25565", "Port/Port range to scan with"),
                 new Option<int>(new string[] {"-t", "--timeout" }, () => 500, "Timeout in milliseconds"),
-                new Option<int>(new string[] {"-s", "--size"}, () => 254, "Number of hosts to scan by batch"),
+                new Option<int>(new string[] {"-s", "--size"}, () => 256, "Number of hosts to scan by batch"),
             };
             
             rootCommand.Handler = CommandHandler.Create<string, string, int, int, bool>(async (target, ports, timeout, size, query) =>
