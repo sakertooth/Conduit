@@ -68,12 +68,22 @@ namespace Conduit.Minecraft
                 var root = jsonDocument.RootElement;
                 if (!root.TryGetProperty("version", out var version) || !version.TryGetProperty("name", out var versionName) ||
                     !root.TryGetProperty("players", out var players) || !players.TryGetProperty("online", out var playersOnline) ||
-                    !players.TryGetProperty("max", out var playersMax))
+                    !players.TryGetProperty("max", out var playersMax) || !root.TryGetProperty("description", out var description))
                 {
                     return null;
                 }
 
-                return new MinecraftResponse(address, port, versionName.ToString(), playersOnline.GetInt32(), playersMax.GetInt32());
+                string responseDescription = null;
+                if (description.TryGetProperty("text", out var text))
+                {
+                    responseDescription = text.GetString();
+                }
+                else
+                {
+                    responseDescription = description.GetString();
+                }
+
+                return new MinecraftResponse(address, port, versionName.ToString(), playersOnline.GetInt32(), playersMax.GetInt32(), responseDescription);
             }
             catch (Exception ex) when (ex is SocketException || ex is IOException || ex is InvalidOperationException || ex is JsonException || ex is OperationCanceledException)
             {

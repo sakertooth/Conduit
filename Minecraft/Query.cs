@@ -56,7 +56,7 @@ namespace Conduit.Minecraft
                     return null;
                 }
 
-                return new MinecraftResponse(address, port, responseInfo[1], int.Parse(responseInfo[3]), int.Parse(responseInfo[4]));
+                return new MinecraftResponse(address, port, responseInfo[1], int.Parse(responseInfo[3]), int.Parse(responseInfo[4]), responseInfo[0]);
             }
             else
             {
