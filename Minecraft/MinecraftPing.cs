@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -12,7 +13,7 @@ namespace Conduit.Minecraft
 {
     static class MinecraftPing
     {
-        public static async Task<byte[]> GetResponse(IPAddress address, int port, int timeout)
+        public static async Task<MinecraftResponse> SendAsync(IPAddress address, int port, int timeout)
         {
             using var client = new TcpClient();
 
@@ -35,9 +36,10 @@ namespace Conduit.Minecraft
                 jsonRead += await stream.ReadAsync(json, jsonRead, json.Length - jsonRead);
             }
 
-            return json;
+            return await ParseResponse(address, port, json);
         }
-        public static async Task<MinecraftResponse> ParseResponse(IPEndPoint endpoint, byte[] json)
+
+        static async Task<MinecraftResponse> ParseResponse(IPAddress address, int port, byte[] json)
         {
             using var jsonStream = new MemoryStream(json);
             using var jsonDocument = await JsonDocument.ParseAsync(jsonStream);
@@ -59,7 +61,7 @@ namespace Conduit.Minecraft
                     responseDescription = description.GetString();
                     break;
             }
-            return new MinecraftResponse(endpoint.Address, endpoint.Port, version, online, max, responseDescription);
+            return new MinecraftResponse(address, port, version, online, max, responseDescription);
         }
 
         static byte[] CreateHandshake(IPAddress address, ushort port)
