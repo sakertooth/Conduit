@@ -10,9 +10,9 @@ using System.Threading.Tasks;
 
 namespace Conduit.Minecraft
 {
-    static class Query
+    static class MinecraftQuery
     {
-        public static async ValueTask<MinecraftResponse> SendQuery(IPAddress address, int port, int timeout)
+        public static async Task<MinecraftResponse> SendQuery(IPAddress address, int port, int timeout)
         {
             using var client = new UdpClient();
             client.Connect(address, port);

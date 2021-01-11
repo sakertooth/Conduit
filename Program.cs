@@ -6,8 +6,10 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
-using System.Threading.Tasks;
+using System.Net.Sockets;
+using System.Text.Json;
 using System.Threading.Tasks.Dataflow;
 
 namespace Conduit
@@ -34,43 +36,83 @@ namespace Conduit
 
                 if (!IPAddressRange.TryParse(target, out var targetRange) || !PortRange.TryParse(ports, out var portRange))
                 {
-                    Console.WriteLine("Could not parse the IP or port range");
+                    Console.WriteLine("Could not parse the target and/or port range");
                     return;
                 }
 
-                var endpointBatchBlock = new BatchBlock<IPEndPoint>(size, new GroupingDataflowBlockOptions() { BoundedCapacity = size });
+                var blockOptions = new ExecutionDataflowBlockOptions() { MaxDegreeOfParallelism = size, BoundedCapacity = size, EnsureOrdered = false };
+                var linkOptions = new DataflowLinkOptions() { PropagateCompletion = true };
 
-                var scanBlock = new ActionBlock<IPEndPoint[]>(async endpoints =>
+                #region Query
+
+                var queryBlock = new TransformBlock<IPEndPoint, MinecraftResponse>(async endpoint =>
                 {
-                    var scanTasks = new List<Task>(endpoints.Length);
-
-                    foreach (var endpoint in endpoints)
+                    try
                     {
-                        scanTasks.Add(ServerListPing.SendMinecraftSlp(endpoint.Address, endpoint.Port, timeout, query).ContinueWith(t =>
-                        {
-                            if (t.Result != null)
-                            {
-                                t.Result.Print();
-                                ++Found;
-                            }
-                        }));
+                        return await MinecraftQuery.SendQuery(endpoint.Address, endpoint.Port, timeout);
                     }
+                    catch (SocketException) { return null; }
+                }, new ExecutionDataflowBlockOptions() { BoundedCapacity = size, EnsureOrdered = false } );
 
-                    await Task.WhenAll(scanTasks);
-                }, new ExecutionDataflowBlockOptions() { BoundedCapacity = 1 });
+                #endregion
 
-                endpointBatchBlock.LinkTo(scanBlock, new DataflowLinkOptions() { PropagateCompletion = true });
+                #region Ping
+
+                var pingBlock = new TransformBlock<IPEndPoint, Tuple<IPEndPoint, byte[]>>(async endpoint =>
+                {
+                    try
+                    {
+                        return Tuple.Create(endpoint, await MinecraftPing.GetResponse(endpoint.Address, endpoint.Port, timeout));
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is SocketException)
+                    {
+                        if (query)
+                        {
+                            await queryBlock.SendAsync(endpoint);
+                        }
+                        return null;
+                    }
+                }, blockOptions);
+
+                var parseJsonBlock = new TransformBlock<Tuple<IPEndPoint, byte[]>, MinecraftResponse>(async json =>
+                {
+                    try
+                    {
+                        var (endpoint, buffer) = json;
+                        return await MinecraftPing.ParseResponse(endpoint, buffer);
+                    }
+                    catch (JsonException) { return null; }
+                    catch (KeyNotFoundException) { return null; }
+                    catch (InvalidOperationException) { return null; }
+                }, blockOptions);
+
+                var printBlock = new ActionBlock<MinecraftResponse>(response =>
+                {
+                    Console.WriteLine($"{response.Address}:{response.Port} [{response.Version}] ({response.Online}/{response.Max}) {response.Description}");
+                    ++Found;
+                }, blockOptions);
+                
+                #endregion
+
+                pingBlock.LinkTo(parseJsonBlock, linkOptions, x => x != null);
+                pingBlock.LinkTo(DataflowBlock.NullTarget<Tuple<IPEndPoint, byte[]>>(), linkOptions);
+
+                parseJsonBlock.LinkTo(printBlock, linkOptions, x => x != null);
+                parseJsonBlock.LinkTo(DataflowBlock.NullTarget<MinecraftResponse>());
+
+                queryBlock.LinkTo(printBlock, linkOptions, x => x != null);
+                queryBlock.LinkTo(DataflowBlock.NullTarget<MinecraftResponse>());
 
                 foreach (var ip in targetRange)
                 {
                     foreach (var port in portRange)
                     {
-                        await endpointBatchBlock.SendAsync(new IPEndPoint(ip, port));
+                        await pingBlock.SendAsync(new IPEndPoint(ip, port));
                     }
                 }
 
-                endpointBatchBlock.Complete();
-                await scanBlock.Completion;
+                pingBlock.Complete();
+                await printBlock.Completion;
 
                 Console.WriteLine($"Found {Found} servers in {(double)runTime.ElapsedMilliseconds / 1000} seconds");
             });

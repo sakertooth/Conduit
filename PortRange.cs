@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Net;
 
 namespace Conduit
 {
@@ -13,7 +14,13 @@ namespace Conduit
                 {
                     var rangeIndex = range.IndexOf('-');
                     if (!int.TryParse(range.Substring(0, rangeIndex), out int rangeMin) 
-                        || !int.TryParse(range.Substring(rangeIndex + 1), out int rangeMax))
+                      || !int.TryParse(range.Substring(rangeIndex + 1), out int rangeMax))
+                    {
+                        return false;
+                    }
+
+                    if (rangeMin < IPEndPoint.MinPort || rangeMin > IPEndPoint.MaxPort ||
+                        rangeMax < rangeMin || rangeMax < IPEndPoint.MinPort || rangeMax > IPEndPoint.MaxPort)
                     {
                         return false;
                     }
